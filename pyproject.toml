@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "tdms-reader"
+version = "0.1.3"
+description = ""
+authors = ["mjaquier <mjaquier@front.xyz>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+nptdms = "^0.27.0"
+pandas = "^1.1.0"
+simplelogging = "^0.10.0"
+bokeh = "^2.1.1"
+scipy = "^1.5.2"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+black = "^19.10b0"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
