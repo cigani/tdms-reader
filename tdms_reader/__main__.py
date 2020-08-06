@@ -22,9 +22,7 @@ log = simplelogging.get_logger()
 
 # load the tdms file
 
-ABS_PATH = os.path.abspath(os.getcwd())
-CSV_PATH = os.path.join(ABS_PATH, "CSV DATA")
-PLOT_PATH = os.path.join(ABS_PATH, "PLOT DATA")
+
 
 
 def create_arg_parser():
@@ -36,27 +34,43 @@ def create_arg_parser():
     parser.add_argument("--data", type=str, help="Path to the data directory.")
     return parser
 
+def get_output(path):
+    ABS_PATH = os.path.abspath(path)
+    CSV_PATH = os.path.join(ABS_PATH, "CSV DATA")
+    PLOT_PATH = os.path.join(ABS_PATH, "PLOT DATA")
+    RAW_CSV_DATA = os.path.join(ABS_PATH, "RAW CSV DATA")
+    return CSV_PATH, PLOT_PATH, RAW_CSV_DATA
 
-def output_directories():
-    for out_paths in [CSV_PATH, PLOT_PATH]:
+
+def output_directories(path):
+    ABS_PATH = os.path.abspath(path)
+    CSV_PATH = os.path.join(ABS_PATH, "CSV DATA")
+    PLOT_PATH = os.path.join(ABS_PATH, "PLOT DATA")
+    RAW_CSV_DATA = os.path.join(ABS_PATH, "RAW CSV DATA")
+    for out_paths in [CSV_PATH, PLOT_PATH, RAW_CSV_DATA]:
         try:
             os.mkdir(out_paths)
         except FileExistsError:
             log.info(f"Already created {out_paths}")
             pass
+    return CSV_PATH, PLOT_PATH, RAW_CSV_DATA
 
 
 def vivdict():
     return defaultdict(vivdict)
 
-
 def load_data(path):
     # Handles nested dictionaries for us
-    output_directories()
+    CSV_PATH, PLOT_PATH, RAW_CSV_DATA = output_directories(path)
     sample_dict = vivdict()
     directory_listing = [
         os.path.join(path, directory) for directory in os.listdir(path)
     ]
+    directory_listing = list(
+        filter(
+            lambda x: not re.findall(r"(CSV DATA)|(PLOT DATA)|(RAW CSV DATA)", x), directory_listing
+        )
+    )
     for directory in directory_listing:
         """
         Example:
@@ -90,13 +104,17 @@ def load_data(path):
             initial_condition = df[:-30].mean()
             df = df.sub(initial_condition)
             sample_dict[sample][sample_type][sample_rep] = df
+            df.to_csv(
+                os.path.join(RAW_CSV_DATA, f"{sample}_{sample_type}_{sample_rep}.csv"), sep=",", index=True
+            )
 
         except [FileNotFoundError, OSError] as e:
             log(f"{e}\t File: {file} \t Directory: {directory}")
     return sample_dict
 
 
-def write_and_plot(sample_dict):
+def write_and_plot(sample_dict, path):
+    CSV_PATH, PLOT_PATH, RAW_CSV_DATA = get_output(path)
     # Merge all the sample data
     sample_families = list(sample_dict.keys())
     composite_data = vivdict()
@@ -207,9 +225,10 @@ if __name__ == "__main__":
     if parsed_args:
         if os.path.exists(parsed_args.data):
             try:
-                raw_dta = load_data(parsed_args.data)
-                write_and_plot(sample_dict=raw_dta)
-            except TypeError as e :
+                raw_dta  = load_data(parsed_args.data)
+                write_and_plot(sample_dict=raw_dta, path=parsed_args.data)
+            except TypeError as e:
                 log.debug(f"{e}")
+                raise(e)
     else:
         log.debug(f"Doesn't look like you entered a proper directory: {parsed_args}")

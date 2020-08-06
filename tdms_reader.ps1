@@ -4,7 +4,6 @@ Param(
   )
 # ~~~~~~~~~~~~~~~~~~ Paths ~~~~~~~~~~~~~~~~~~ #
 $username = $env:USERNAME
-$cwd = Get-Location
 $pythonVersion = "3.8.5"
 $pythonUrl = "https://www.python.org/ftp/python/$pythonVersion/python-$pythonVersion.exe"
 $pythonDownloadPath = "C:\Users\$username\python-$pythonVersion.exe"
@@ -30,11 +29,10 @@ virtualenv $venvDir
 }
 Set-Location $venvDir/Scripts
 ./activate
-Set-Location $cwd
+Set-Location $filepath
 
 # ~~~~~~~~~~~~~~~~~~ Package ~~~~~~~~~~~~~~~~~~ #
 pip install $application -q
 pip install $application -Uq
 $app = $application.Replace('-', '_')
 python -m $app --data=$filepath
-
