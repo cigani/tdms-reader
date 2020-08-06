@@ -5,6 +5,7 @@ import re
 import sys
 from collections import defaultdict
 
+import bokeh
 import pandas as pd
 import simplelogging
 from bokeh.models import (
@@ -18,7 +19,9 @@ from nptdms import TdmsFile
 from scipy import integrate
 
 # logging
-log = simplelogging.get_logger()
+os.environ["BOKEH_DEV"] = "false"
+CONSOLE_FORMAT = " %(log_color)s%(message)s%(reset)s"
+log = simplelogging.get_logger(console_format=CONSOLE_FORMAT)
 
 
 # load the tdms file
@@ -51,7 +54,7 @@ def output_directories(path):
         try:
             os.mkdir(out_paths)
         except FileExistsError:
-            log.info(f"Already created {out_paths}")
+            log.debug(f"Already created {out_paths}")
             pass
     return CSV_PATH, PLOT_PATH, RAW_CSV_DATA
 
@@ -81,6 +84,7 @@ def load_data(path):
         sample_type == Control
         sample_rep == 3
         """
+        log.info(f"Loading data for -> {directory}")
         sample = re.split(r"[_\-]", directory)[-2]
         sample_type = " ".join(re.split(r"[_\-]", directory)[-1].split(" ")[0:-1])
         sample_rep = " ".join(re.split(r"[_\-]", directory)[-1].split(" ")[-1])
@@ -129,17 +133,17 @@ def write_and_plot(sample_dict, path):
 
     for family in sample_families:
         for method, _ in sample_dict[family].items():
+            log.info(f"Working on {method}")
             composite_data[family][method] = cd = pd.concat(
                 sample_dict[family][method], axis=1
             ).apply(lambda g: pd.Series.interpolate(g, method="cubic"))
-
+            ppm_calculated_once = cd.mul(10000 * 1.9378).droplevel(axis=1, level=1)
             # Integral
-            heating = cd[0:150]
-            ppm = heating.mul(10000 * 1.9378)
+            ppm = pd.DataFrame(ppm_calculated_once[0:150])
             ppm.reset_index(inplace=True)
             ppm["Volume"] = ppm["Time"].apply(lambda x: x * VOLUME_CALCULATED)
             ppm.set_index("Volume", inplace=True)
-            ppm = ppm.drop(columns=["Time"], errors="ignore", level=0)
+            ppm = ppm.drop(columns=["Time"], errors="ignore")
             row_integral = (
                 ppm.ewm(span=5)
                 .mean()
@@ -161,17 +165,16 @@ def write_and_plot(sample_dict, path):
                 os.path.join(CSV_PATH, f"{family}_{method}.csv"), sep=",", index=False
             )
 
-            # STD Data
-            cd_mean = cd.mean(axis=1)
-            source_data = cd_mean.reset_index()
-            source_data.columns = ["Time", "CO2"]
-            cd_std = cd.std(axis=1).rolling(window=3).mean().fillna(method="backfill")
-            source_data["lower"] = source_data.CO2 - cd_std.reset_index()[0]
-            source_data["upper"] = source_data.CO2 + cd_std.reset_index()[0]
-            std_data[f"{family} {method} STD"] = cd_std
+            # Mean/STD Data
+            source_data = pd.DataFrame()
+            source_data["mean"] = ppm_calculated_once.mean(axis=1)
+            source_data["std"] = ppm_calculated_once.std(axis=1)
+            source_data["lower"] = source_data["mean"] - source_data["std"]
+            source_data["upper"] = source_data["mean"] + source_data["std"]
 
             # Graphing our data
             output_file(os.path.join(PLOT_PATH, f"{family}-{method}.html"))
+            source_data = source_data.reset_index().rename(columns={"index": "Time"})
             source = ColumnDataSource(source_data)
             p = figure(
                 title=f"{family} {method}",
@@ -181,7 +184,7 @@ def write_and_plot(sample_dict, path):
                 toolbar_location=None,
             )
             p.line(
-                source=source, x="Time", y="CO2",
+                source=source, x="Time", y="mean",
             )
             band = Band(
                 base="Time",
@@ -198,19 +201,14 @@ def write_and_plot(sample_dict, path):
             p.xgrid[0].grid_line_color = None
             p.ygrid[0].grid_line_alpha = 0.5
             p.xaxis.axis_label = "Time"
-            p.yaxis.axis_label = "CO2"
-            p.y_range.start = source_data.CO2.min() - cd_std.reset_index()[0].max()/6
-            p.y_range.end = source_data.CO2.max() + cd_std.reset_index()[0].max()
+            p.yaxis.axis_label = "CO2 (PPM)"
+            p.y_range.start = source_data["mean"].min() - source_data["std"].max() / 6
+            p.y_range.end = source_data["mean"].max() + source_data["std"].max()
             p.ygrid.band_fill_alpha = 0.1
             p.ygrid.band_fill_color = "#C0C0C0"
-
-            x, y = source_data['Time'], source_data['CO2']
-            cr = p.circle(x, y, size=10,
-                             fill_color="grey", hover_fill_color="firebrick",
-                             fill_alpha=0.0, hover_alpha=0.3,
-                             line_color=None, hover_line_color="black")
-            p.add_tools(HoverTool(tooltips=[("Value", "@CO2")], mode='vline'))
-            # p.add_tools(HoverTool(tooltips=None, renderers=[cr], mode='hline'))
+            p.add_tools(
+                HoverTool(tooltips=[("Value", "@mean"), ("STD", "@std")], mode="vline")
+            )
 
             show(p)
 
@@ -248,8 +246,8 @@ def write_and_plot(sample_dict, path):
         )
     )
     p.xaxis.major_label_orientation = "vertical"
-    p.y_range.start = integral_df["Integral"].min() - integral_df["STD"].max()*1.2
-    p.y_range.end = integral_df["Integral"].max() + integral_df["STD"].max()*1.2
+    p.y_range.start = integral_df["Integral"].min() - integral_df["STD"].max() * 1.2
+    p.y_range.end = integral_df["Integral"].max() + integral_df["STD"].max() * 1.2
     hover = HoverTool()
     hover.tooltips = [("Sample", "@index"), ("Value", "@Integral"), ("STD", "@STD")]
     hover.mode = "vline"
