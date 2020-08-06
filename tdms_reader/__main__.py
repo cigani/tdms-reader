@@ -20,9 +20,8 @@ from scipy import integrate
 # logging
 log = simplelogging.get_logger()
 
+
 # load the tdms file
-
-
 
 
 def create_arg_parser():
@@ -33,6 +32,7 @@ def create_arg_parser():
     )
     parser.add_argument("--data", type=str, help="Path to the data directory.")
     return parser
+
 
 def get_output(path):
     ABS_PATH = os.path.abspath(path)
@@ -59,6 +59,7 @@ def output_directories(path):
 def vivdict():
     return defaultdict(vivdict)
 
+
 def load_data(path):
     # Handles nested dictionaries for us
     CSV_PATH, PLOT_PATH, RAW_CSV_DATA = output_directories(path)
@@ -68,7 +69,8 @@ def load_data(path):
     ]
     directory_listing = list(
         filter(
-            lambda x: not re.findall(r"(CSV DATA)|(PLOT DATA)|(RAW CSV DATA)", x), directory_listing
+            lambda x: not re.findall(r"(CSV DATA)|(PLOT DATA)|(RAW CSV DATA)", x),
+            directory_listing,
         )
     )
     for directory in directory_listing:
@@ -105,7 +107,9 @@ def load_data(path):
             df = df.sub(initial_condition)
             sample_dict[sample][sample_type][sample_rep] = df
             df.to_csv(
-                os.path.join(RAW_CSV_DATA, f"{sample}_{sample_type}_{sample_rep}.csv"), sep=",", index=True
+                os.path.join(RAW_CSV_DATA, f"{sample}_{sample_type}_{sample_rep}.csv"),
+                sep=",",
+                index=True,
             )
 
         except [FileNotFoundError, OSError] as e:
@@ -120,6 +124,8 @@ def write_and_plot(sample_dict, path):
     composite_data = vivdict()
     integral_data = []
     std_data = {}
+    VOLUME = 1.2
+    VOLUME_CALCULATED = VOLUME / (60 * 1000)
 
     for family in sample_families:
         for method, _ in sample_dict[family].items():
@@ -129,8 +135,15 @@ def write_and_plot(sample_dict, path):
 
             # Integral
             heating = cd[0:150]
+            ppm = heating.mul(10000 * 1.9378)
+            ppm.reset_index(inplace=True)
+            ppm["Volume"] = ppm["Time"].apply(lambda x: x * VOLUME_CALCULATED)
+            ppm.set_index("Volume", inplace=True)
+            ppm = ppm.drop(columns=["Time"], errors="ignore", level=0)
             row_integral = (
-                heating.ewm(span=5).mean().apply(lambda g: integrate.trapz(g))
+                ppm.ewm(span=5)
+                .mean()
+                .apply(lambda g: integrate.trapz(x=g.index, y=g.values))
             )
             row_integral_std = row_integral.std()
             integral = pd.DataFrame(
@@ -165,6 +178,7 @@ def write_and_plot(sample_dict, path):
                 x_axis_label="Time",
                 y_axis_label="CO2 Release",
                 background_fill_color="#efefef",
+                toolbar_location=None,
             )
             p.line(
                 source=source, x="Time", y="CO2",
@@ -184,7 +198,19 @@ def write_and_plot(sample_dict, path):
             p.xgrid[0].grid_line_color = None
             p.ygrid[0].grid_line_alpha = 0.5
             p.xaxis.axis_label = "Time"
-            p.yaxis.axis_label = "CO_2"
+            p.yaxis.axis_label = "CO2"
+            p.y_range.start = source_data.CO2.min() - cd_std.reset_index()[0].max()/6
+            p.y_range.end = source_data.CO2.max() + cd_std.reset_index()[0].max()
+            p.ygrid.band_fill_alpha = 0.1
+            p.ygrid.band_fill_color = "#C0C0C0"
+
+            x, y = source_data['Time'], source_data['CO2']
+            cr = p.circle(x, y, size=10,
+                             fill_color="grey", hover_fill_color="firebrick",
+                             fill_alpha=0.0, hover_alpha=0.3,
+                             line_color=None, hover_line_color="black")
+            p.add_tools(HoverTool(tooltips=[("Value", "@CO2")], mode='vline'))
+            # p.add_tools(HoverTool(tooltips=None, renderers=[cr], mode='hline'))
 
             show(p)
 
@@ -197,24 +223,36 @@ def write_and_plot(sample_dict, path):
         toolbar_location=None,
         title="CO2 Integral",
         background_fill_color="#efefef",
+        y_axis_label="CO2 (mg)",
+        tools="tap",
     )
     p.circle(
-        x="index", y="Integral", color="red", fill_alpha=0.2, size=10, source=source
+        x="index",
+        y="Integral",
+        color="red",
+        fill_alpha=0.4,
+        line_color="firebrick",
+        line_alpha=1.0,
+        size=10,
+        source=source,
+        selection_color="firebrick",
+        nonselection_fill_alpha=0.2,
+        nonselection_fill_color="firebrick",
+        nonselection_line_color="blue",
+        nonselection_line_alpha=1.0,
     )
+
     p.add_layout(
         Whisker(
             source=source, base="index", upper="upper", lower="lower", level="overlay"
         )
     )
     p.xaxis.major_label_orientation = "vertical"
-    p.y_range.start = integral_df["Integral"].min() - integral_df["STD"].max() - 5
-    p.y_range.end = integral_df["Integral"].max() + integral_df["STD"].max() + 5
-
+    p.y_range.start = integral_df["Integral"].min() - integral_df["STD"].max()*1.2
+    p.y_range.end = integral_df["Integral"].max() + integral_df["STD"].max()*1.2
     hover = HoverTool()
     hover.tooltips = [("Sample", "@index"), ("Value", "@Integral"), ("STD", "@STD")]
-
     hover.mode = "vline"
-
     p.add_tools(hover)
     show(p)
 
@@ -225,10 +263,10 @@ if __name__ == "__main__":
     if parsed_args:
         if os.path.exists(parsed_args.data):
             try:
-                raw_dta  = load_data(parsed_args.data)
+                raw_dta = load_data(parsed_args.data)
                 write_and_plot(sample_dict=raw_dta, path=parsed_args.data)
             except TypeError as e:
                 log.debug(f"{e}")
-                raise(e)
+                raise (e)
     else:
         log.debug(f"Doesn't look like you entered a proper directory: {parsed_args}")

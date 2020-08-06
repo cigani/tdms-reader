@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tdms-reader"
-version = "0.1.6"
+version = "0.1.9"
 description = ""
 authors = ["mjaquier <mjaquier@front.xyz>"]
 
