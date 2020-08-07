@@ -5,7 +5,6 @@ import re
 import sys
 from collections import defaultdict
 
-import bokeh
 import pandas as pd
 import simplelogging
 from bokeh.models import (
@@ -19,13 +18,8 @@ from nptdms import TdmsFile
 from scipy import integrate
 
 # logging
-os.environ["BOKEH_DEV"] = "false"
 CONSOLE_FORMAT = " %(log_color)s%(message)s%(reset)s"
 log = simplelogging.get_logger(console_format=CONSOLE_FORMAT)
-
-
-# load the tdms file
-
 
 def create_arg_parser():
     """"Creates and returns the ArgumentParser object."""
@@ -93,31 +87,29 @@ def load_data(path):
         file = list(
             filter(lambda x: not re.findall(r"index", x), glob.glob(f"{directory}\*"))
         )
-        if len(file) > 1:
-            log(f"Multiple files not supported. Split up {directory}")
-        else:
+        if len(file) == 1:
             file = file[0]
-        # Load the TDMS File
-        try:
-            tdms_file = TdmsFile(file)
-            df = tdms_file.as_dataframe()
-            df = df[
-                list(filter(lambda x: re.findall(r"Timestampe|CO2", x), df.columns))
-            ]
-            df.columns = ["CO2", "Time"]
-            df["Time"] = df["Time"].sub(df["Time"].min()).sub(40)
-            df.set_index("Time", inplace=True)
-            initial_condition = df[:-30].mean()
-            df = df.sub(initial_condition)
-            sample_dict[sample][sample_type][sample_rep] = df
-            df.to_csv(
-                os.path.join(RAW_CSV_DATA, f"{sample}_{sample_type}_{sample_rep}.csv"),
-                sep=",",
-                index=True,
-            )
-
-        except [FileNotFoundError, OSError] as e:
-            log(f"{e}\t File: {file} \t Directory: {directory}")
+            try:
+                tdms_file = TdmsFile(file)
+                df = tdms_file.as_dataframe()
+                df = df[
+                    list(filter(lambda x: re.findall(r"Timestampe|CO2", x), df.columns))
+                ]
+                df.columns = ["CO2", "Time"]
+                df["Time"] = df["Time"].sub(df["Time"].min()).sub(40)
+                df.set_index("Time", inplace=True)
+                initial_condition = df[:-30].mean()
+                df = df.sub(initial_condition)
+                sample_dict[sample][sample_type][sample_rep] = df
+                df.to_csv(
+                    os.path.join(RAW_CSV_DATA, f"{sample}_{sample_type}_{sample_rep}.csv"),
+                    sep=",",
+                    index=True,
+                )
+            except [FileNotFoundError, OSError] as e:
+                log(f"{e}\t File: {file} \t Directory: {directory}")
+        else:
+            log(f"Have some files here I don't like {directory} // \n{file} \n-- Skipping this")
     return sample_dict
 
 
@@ -127,7 +119,6 @@ def write_and_plot(sample_dict, path):
     sample_families = list(sample_dict.keys())
     composite_data = vivdict()
     integral_data = []
-    std_data = {}
     VOLUME = 1.2
     VOLUME_CALCULATED = VOLUME / (60 * 1000)
 
